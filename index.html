@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>New invoice</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f2f3f5);
+    --text: var(--tg-theme-text-color, #1b1f27);
+    --hint: var(--tg-theme-hint-color, #7a808c);
+    --navy: #1F3864; --gold: #C9A227;
+    --accent: var(--tg-theme-button-color, #1F3864);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --line: color-mix(in srgb, var(--hint) 28%, transparent);
+    --err: #c62828;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg2);color:var(--text);
+    font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",sans-serif}
+  main{max-width:560px;margin:0 auto;padding:12px 12px 120px}
+  section{background:var(--bg);border-radius:14px;padding:14px 14px 16px;margin-bottom:10px}
+  h2{font-size:14px;font-weight:600;color:var(--hint);margin:0 0 10px}
+  label{display:block;font-size:13px;color:var(--hint);margin:12px 0 5px}
+  label:first-of-type{margin-top:0}
+  input,textarea,select{width:100%;font:inherit;color:var(--text);background:var(--bg2);
+    border:1.5px solid transparent;border-radius:10px;padding:11px 12px;outline:none;-webkit-appearance:none;appearance:none}
+  input:focus,textarea:focus{border-color:var(--accent)}
+  textarea{resize:vertical;min-height:72px}
+  input[type=date]{min-height:46px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{border:1.5px solid var(--line);background:var(--bg);color:var(--text);border-radius:999px;
+    padding:8px 14px;font:inherit;font-size:15px;cursor:pointer}
+  .chip[aria-pressed=true]{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+  .quick{margin-top:10px}
+  .quick .chip{font-size:13px;padding:6px 11px}
+  #newClient{display:none;margin-top:12px}
+  .err{color:var(--err);font-size:13px;margin-top:5px;display:none}
+  .bad{border-color:var(--err)!important}
+  /* the bill: the one bold element */
+  .bill{background:var(--navy);color:#fff;border-radius:14px;padding:16px 16px 14px;margin-bottom:10px}
+  .bill .l{display:flex;justify-content:space-between;font-size:15px;opacity:.85;padding:3px 0}
+  .bill .total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid rgba(255,255,255,.25);
+    margin-top:8px;padding-top:10px}
+  .bill .total b{font:600 28px/1.1 Georgia,"Times New Roman",serif;color:#fff}
+  .bill .total span{font-size:14px;opacity:.85}
+  .bill .words{font:italic 14px/1.35 Georgia,"Times New Roman",serif;color:#E9D48A;margin-top:8px;min-height:19px}
+  #fallbackBtn{display:none;width:100%;padding:15px;border:0;border-radius:12px;background:var(--accent);
+    color:var(--accent-text);font:600 17px/1 inherit;margin-top:6px}
+  @media (prefers-reduced-motion:no-preference){ .chip{transition:background .12s,color .12s} }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Client</h2>
+    <div class="chips" id="clients" role="group" aria-label="Client"></div>
+    <div id="newClient">
+      <label for="ncName">Client name</label>
+      <input id="ncName" placeholder="M/S ABC Pvt Ltd" autocomplete="off">
+      <label for="ncAddr">Address</label>
+      <input id="ncAddr" placeholder="Jajpur Road, Odisha" autocomplete="off">
+      <label for="ncGst">GSTIN</label>
+      <input id="ncGst" placeholder="15 characters" maxlength="15" autocomplete="off" style="text-transform:uppercase">
+      <div class="err" id="gstErr">GSTIN should be 15 characters, like 21AHTPD4263G2ZH.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Service period</h2>
+    <div class="row">
+      <div><label for="from">From</label><input type="date" id="from"></div>
+      <div><label for="to">To</label><input type="date" id="to"></div>
+    </div>
+    <div class="err" id="dateErr">"To" date can't be before "From" date.</div>
+    <div class="chips quick" id="quick"></div>
+  </section>
+
+  <section>
+    <h2>Work</h2>
+    <label for="place">Place of service</label>
+    <input id="place">
+    <label for="descr">Description</label>
+    <textarea id="descr" rows="3"></textarea>
+    <div class="row" style="margin-top:2px">
+      <div><label for="qty">Quantity</label><input id="qty" inputmode="decimal" value="1"></div>
+      <div><label for="rate">Rate (₹, before GST)</label><input id="rate" inputmode="decimal" placeholder="410700"></div>
+    </div>
+  </section>
+
+  <div class="bill" aria-live="polite">
+    <div class="l"><span>Amount</span><span id="bAmt">₹0.00</span></div>
+    <div id="bTax"></div>
+    <div class="total"><span>Invoice total</span><b id="bTot">₹0.00</b></div>
+    <div class="words" id="bWords"></div>
+  </div>
+  <button id="fallbackBtn">Create invoice</button>
+</main>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+// ---- data passed by the bot in ?d=<base64url json> ----
+function readData(){
+  try{
+    const raw = new URLSearchParams(location.search).get("d") || "";
+    const b64 = raw.replace(/-/g,"+").replace(/_/g,"/");
+    const json = decodeURIComponent(escape(atob(b64)));
+    return JSON.parse(json);
+  }catch(e){ return {c:[],h:"20",r:0.18,p:"",d:""}; }
+}
+const D = readData();
+const $ = id => document.getElementById(id);
+let client = null;   // index into D.c, or "new"
+
+// ---- clients ----
+function renderClients(){
+  const box = $("clients"); box.innerHTML = "";
+  D.c.forEach((c,i)=>box.appendChild(chip(c.n, ()=>pickClient(i), client===i)));
+  box.appendChild(chip("+ New client", ()=>pickClient("new"), client==="new"));
+}
+function chip(text, onClick, on){
+  const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.textContent=text; b.setAttribute("aria-pressed", on?"true":"false"); b.onclick=onClick; return b;
+}
+function pickClient(i){
+  client=i; renderClients();
+  $("newClient").style.display = i==="new" ? "block" : "none";
+  const last = (i!=="new" && D.c[i].d) || D.d;
+  if(!$("descr").dataset.touched) $("descr").value = last;
+  tg?.HapticFeedback?.selectionChanged();
+  update();
+}
+$("descr").addEventListener("input", e=>e.target.dataset.touched="1");
+
+// ---- dates ----
+const iso = d => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+const today = new Date();
+const mStart = (y,m)=>new Date(y,m,1), mEnd=(y,m)=>new Date(y,m+1,0);
+const Y=today.getFullYear(), M=today.getMonth();
+const monthName = (y,m)=>mStart(y,m).toLocaleString("en-IN",{month:"long"});
+const quicks = [
+  [monthName(Y,M-1)+" + "+monthName(Y,M), mStart(Y,M-1), mEnd(Y,M)],
+  [monthName(Y,M-1), mStart(Y,M-1), mEnd(Y,M-1)],
+  [monthName(Y,M), mStart(Y,M), mEnd(Y,M)],
+];
+quicks.forEach(([t,a,b])=>$("quick").appendChild(chip(t, ()=>{ $("from").value=iso(a); $("to").value=iso(b); update(); })));
+$("from").value = iso(quicks[0][1]); $("to").value = iso(quicks[0][2]);
+
+$("place").value = D.p || "";
+
+// ---- money ----
+const num = s => { s=String(s).toLowerCase().replace(/[,₹\s]|rs/g,""); let m=1;
+  if(/l(akh)?s?$/.test(s)){ m=100000; s=s.replace(/[a-z]+$/,""); } const v=parseFloat(s); return isFinite(v)? Math.round(v*m*100)/100 : NaN; };
+const inr = v => "₹" + v.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const ONES="zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(" ");
+const TENS=["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
+const two = n => n<20 ? ONES[n] : TENS[Math.floor(n/10)] + (n%10 ? " "+ONES[n%10] : "");
+function words(x){
+  let n=Math.round(x); if(!n) return "";
+  const parts=[]; for(const [div,name] of [[1e7,"crore"],[1e5,"lakh"],[1e3,"thousand"],[100,"hundred"]]){
+    const q=Math.floor(n/div); n%=div;
+    if(q) parts.push((q>99? words(q).replace(/ only\.$/,"").toLowerCase() : two(q))+" "+name+(name==="lakh"&&q>1?"s":""));
+  }
+  if(n) parts.push(two(n)); const s=parts.join(" "); return s[0].toUpperCase()+s.slice(1)+" only.";
+}
+
+function gstin(){
+  if(client==="new") return $("ncGst").value.trim().toUpperCase();
+  return client!==null ? D.c[client].g : "";
+}
+
+function update(){
+  const qty=num($("qty").value), rate=num($("rate").value);
+  const amt = (qty>0 && rate>0) ? Math.round(qty*rate*100)/100 : 0;
+  const gst = Math.round(amt*D.r*100)/100, pct=D.r*100;
+  const local = gstin().slice(0,2) === D.h;
+  $("bAmt").textContent = inr(amt);
+  $("bTax").innerHTML = local
+    ? `<div class="l"><span>CGST ${pct/2}%</span><span>${inr(Math.round(gst/2*100)/100)}</span></div>
+       <div class="l"><span>SGST ${pct/2}%</span><span>${inr(gst-Math.round(gst/2*100)/100)}</span></div>`
+    : `<div class="l"><span>IGST ${pct}%</span><span>${inr(gst)}</span></div>`;
+  const tot = amt+gst;
+  $("bTot").textContent = inr(tot);
+  $("bWords").textContent = words(tot);
+
+  const badDates = $("from").value && $("to").value && $("to").value < $("from").value;
+  $("dateErr").style.display = badDates ? "block":"none";
+  $("to").classList.toggle("bad", !!badDates);
+
+  const ready = client!==null && amt>0 && $("from").value && $("to").value && !badDates
+                && $("place").value.trim() && $("descr").value.trim() && (client!=="new" || newClientOk(false));
+  const label = ready ? `Create invoice  ${inr(tot)}` : "Fill in all fields";
+  if(tg?.MainButton){ tg.MainButton.setText(label); ready ? tg.MainButton.enable() : tg.MainButton.disable();
+    tg.MainButton.color = ready ? "#1F3864" : "#9aa3b2"; tg.MainButton.show(); }
+  $("fallbackBtn").textContent = label; $("fallbackBtn").disabled = !ready;
+  return ready;
+}
+const GST_RE=/^\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
+function newClientOk(show){
+  const g=$("ncGst").value.trim().toUpperCase();
+  const ok = $("ncName").value.trim() && $("ncAddr").value.trim() && GST_RE.test(g);
+  if(show){ const bad = g.length>0 && !GST_RE.test(g); $("gstErr").style.display = bad?"block":"none"; $("ncGst").classList.toggle("bad",bad); }
+  return !!ok;
+}
+["qty","rate","place","descr","from","to","ncName","ncAddr"].forEach(id=>$(id).addEventListener("input",update));
+$("ncGst").addEventListener("input",()=>{ newClientOk(true); update(); });
+
+function submit(){
+  if(!update()) return;
+  const payload = {
+    client: client==="new" ? null : D.c[client].n,
+    new: client==="new" ? {name:$("ncName").value.trim(), address:$("ncAddr").value.trim(), gstin:gstin()} : null,
+    from:$("from").value, to:$("to").value, place:$("place").value.trim(), descr:$("descr").value.trim(),
+    qty:num($("qty").value), rate:num($("rate").value)
+  };
+  if(tg?.sendData){ tg.sendData(JSON.stringify(payload)); }
+  else alert("Open this form from the Telegram bot.");
+}
+tg?.MainButton?.onClick(submit);
+$("fallbackBtn").onclick = submit;
+if(!tg || !tg.initData) $("fallbackBtn").style.display="block";   // opened outside Telegram (preview)
+
+if(D.c.length===1) pickClient(0); else renderClients();
+update();
+</script>
+</body>
+</html>
