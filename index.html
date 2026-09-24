@@ -38,6 +38,13 @@
   .quick{margin-top:10px}
   .quick .chip{font-size:13px;padding:6px 11px}
   #newClient{display:none;margin-top:12px}
+  select{background-image:linear-gradient(45deg,transparent 50%,var(--hint) 50%),linear-gradient(135deg,var(--hint) 50%,transparent 50%);
+    background-position:calc(100% - 20px) 50%,calc(100% - 14px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:36px}
+  .note{font-size:13px;color:var(--hint);margin-top:8px;display:none}
+  .sugg{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .sugg button{text-align:left;border:1.5px dashed var(--line);background:transparent;color:var(--text);
+    border-radius:10px;padding:8px 10px;font:inherit;font-size:14px;cursor:pointer}
+  .sugg:empty{display:none}
   .err{color:var(--err);font-size:13px;margin-top:5px;display:none}
   .bad{border-color:var(--err)!important}
   /* the bill: the one bold element */
@@ -57,7 +64,9 @@
 <main>
   <section>
     <h2>Client</h2>
-    <div class="chips" id="clients" role="group" aria-label="Client"></div>
+    <label for="clientSel" style="position:absolute;left:-9999px">Client</label>
+    <select id="clientSel"></select>
+    <div class="note" id="autoNote"></div>
     <div id="newClient">
       <label for="ncName">Client name</label>
       <input id="ncName" placeholder="M/S ABC Pvt Ltd" autocomplete="off">
@@ -82,9 +91,11 @@
   <section>
     <h2>Work</h2>
     <label for="place">Place of service</label>
-    <input id="place">
+    <input id="place" list="placeList" autocomplete="off">
+    <datalist id="placeList"></datalist>
     <label for="descr">Description</label>
-    <textarea id="descr" rows="3"></textarea>
+    <select id="descSel"></select>
+    <textarea id="descr" rows="3" placeholder="Describe the work" style="display:none;margin-top:8px"></textarea>
     <div class="row" style="margin-top:2px">
       <div><label for="qty">Quantity</label><input id="qty" inputmode="decimal" value="1"></div>
       <div><label for="rate">Rate (₹, before GST)</label><input id="rate" inputmode="decimal" placeholder="410700"></div>
@@ -117,26 +128,57 @@ const D = readData();
 const $ = id => document.getElementById(id);
 let client = null;   // index into D.c, or "new"
 
-// ---- clients ----
+// ---- clients (dropdown) + autofill from their last invoice ----
 function renderClients(){
-  const box = $("clients"); box.innerHTML = "";
-  D.c.forEach((c,i)=>box.appendChild(chip(c.n, ()=>pickClient(i), client===i)));
-  box.appendChild(chip("+ New client", ()=>pickClient("new"), client==="new"));
+  const sel=$("clientSel");
+  sel.innerHTML = '<option value="" disabled selected>Choose a client</option>' +
+    D.c.map((c,i)=>`<option value="${i}">${c.n.replace(/</g,"&lt;")}</option>`).join("") +
+    '<option value="new">+ Add a new client</option>';
 }
-function chip(text, onClick, on){
-  const b=document.createElement("button"); b.type="button"; b.className="chip";
-  b.textContent=text; b.setAttribute("aria-pressed", on?"true":"false"); b.onclick=onClick; return b;
-}
+$("clientSel").addEventListener("change", e=>pickClient(e.target.value==="new" ? "new" : +e.target.value));
 function pickClient(i){
-  client=i; renderClients();
+  client=i; $("clientSel").value = String(i);
   $("newClient").style.display = i==="new" ? "block" : "none";
-  const last = (i!=="new" && D.c[i].d) || D.d;
-  if(!$("descr").dataset.touched) $("descr").value = last;
+  const c = i==="new" ? null : D.c[i];
+  if(c && c.no){
+    $("place").value = c.p; $("qty").value = c.q; $("rate").value = c.r; renderDesc(c.d);
+    $("autoNote").textContent = `Filled from last invoice ${c.no}. Change anything you need.`;
+    $("autoNote").style.display = "block";
+  }else{
+    $("place").value = D.p || ""; $("qty").value = 1; $("rate").value = ""; renderDesc(D.d);
+    $("autoNote").style.display = "none";
+  }
   tg?.HapticFeedback?.selectionChanged();
   update();
 }
-$("descr").addEventListener("input", e=>e.target.dataset.touched="1");
+const NEW_DESC="__new__";
+function descOptions(preferred){
+  const list=[]; [preferred, ...(D.ds||[]), D.d].forEach(d=>{ if(d && !list.includes(d)) list.push(d); });
+  return list;
+}
+function renderDesc(preferred){
+  const sel=$("descSel"), opts=descOptions(preferred);
+  sel.innerHTML = opts.map((d,i)=>{
+      const short = d.length>48 ? d.slice(0,46).trim()+"…" : d;
+      return `<option value="${i}">${short.replace(/</g,"&lt;")}</option>`; }).join("")
+    + `<option value="${NEW_DESC}">✏️ Write a new one</option>`;
+  sel._opts = opts;
+  if(preferred){ sel.value="0"; setDesc("0"); } else { sel.value=NEW_DESC; setDesc(NEW_DESC); }
+}
+function setDesc(v){
+  const ta=$("descr");
+  if(v===NEW_DESC){ ta.style.display="block"; ta.value=""; ta.focus(); }
+  else { ta.style.display="none"; ta.value=$("descSel")._opts[+v]; }
+  update();
+}
+$("descSel").addEventListener("change", e=>setDesc(e.target.value));
 
+$("placeList").innerHTML = (D.ps||[]).map(p=>`<option value="${p.replace(/"/g,"&quot;")}">`).join("");
+
+function chip(text, onClick){
+  const b=document.createElement("button"); b.type="button"; b.className="chip";
+  b.textContent=text; b.onclick=onClick; return b;
+}
 // ---- dates ----
 const iso = d => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
 const today = new Date();
@@ -225,7 +267,9 @@ tg?.MainButton?.onClick(submit);
 $("fallbackBtn").onclick = submit;
 if(!tg || !tg.initData) $("fallbackBtn").style.display="block";   // opened outside Telegram (preview)
 
-if(D.c.length===1) pickClient(0); else renderClients();
+renderClients(); renderDesc(D.d);
+if(D.c.length===1) pickClient(0);
+if(!D.c.length) $("autoNote").textContent = "Open this form from the bot's New Invoice button to see your clients.", $("autoNote").style.display="block";
 update();
 </script>
 </body>
