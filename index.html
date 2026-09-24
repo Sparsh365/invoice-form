@@ -91,8 +91,8 @@
   <section>
     <h2>Work</h2>
     <label for="place">Place of service</label>
-    <input id="place" list="placeList" autocomplete="off">
-    <datalist id="placeList"></datalist>
+    <select id="placeSel"></select>
+    <input id="place" placeholder="Type the place" autocomplete="off" style="display:none;margin-top:8px">
     <label for="descr">Description</label>
     <select id="descSel"></select>
     <textarea id="descr" rows="3" placeholder="Describe the work" style="display:none;margin-top:8px"></textarea>
@@ -141,11 +141,11 @@ function pickClient(i){
   $("newClient").style.display = i==="new" ? "block" : "none";
   const c = i==="new" ? null : D.c[i];
   if(c && c.no){
-    $("place").value = c.p; $("qty").value = c.q; $("rate").value = c.r; renderDesc(c.d);
+    renderPlace(c.p); $("qty").value = c.q; $("rate").value = c.r; renderDesc(c.d);
     $("autoNote").textContent = `Filled from last invoice ${c.no}. Change anything you need.`;
     $("autoNote").style.display = "block";
   }else{
-    $("place").value = D.p || ""; $("qty").value = 1; $("rate").value = ""; renderDesc(D.d);
+    renderPlace(D.p); $("qty").value = 1; $("rate").value = ""; renderDesc(D.d);
     $("autoNote").style.display = "none";
   }
   tg?.HapticFeedback?.selectionChanged();
@@ -173,7 +173,21 @@ function setDesc(v){
 }
 $("descSel").addEventListener("change", e=>setDesc(e.target.value));
 
-$("placeList").innerHTML = (D.ps||[]).map(p=>`<option value="${p.replace(/"/g,"&quot;")}">`).join("");
+// ---- place dropdown ----
+function renderPlace(preferred){
+  const opts=[]; [preferred, D.p, ...(D.ps||[])].forEach(p=>{ if(p && !opts.includes(p)) opts.push(p); });
+  const sel=$("placeSel");
+  sel.innerHTML = opts.map((p,i)=>`<option value="${i}">${p.replace(/</g,"&lt;")}</option>`).join("")
+    + `<option value="${NEW_DESC}">✏️ Other place</option>`;
+  sel._opts=opts; sel.value = opts.length ? "0" : NEW_DESC; setPlace(sel.value);
+}
+function setPlace(v){
+  const inp=$("place");
+  if(v===NEW_DESC){ inp.style.display="block"; inp.value=""; inp.focus(); }
+  else { inp.style.display="none"; inp.value=$("placeSel")._opts[+v]; }
+  update();
+}
+$("placeSel").addEventListener("change", e=>setPlace(e.target.value));
 
 function chip(text, onClick){
   const b=document.createElement("button"); b.type="button"; b.className="chip";
@@ -193,7 +207,6 @@ const quicks = [
 quicks.forEach(([t,a,b])=>$("quick").appendChild(chip(t, ()=>{ $("from").value=iso(a); $("to").value=iso(b); update(); })));
 $("from").value = iso(quicks[0][1]); $("to").value = iso(quicks[0][2]);
 
-$("place").value = D.p || "";
 
 // ---- money ----
 const num = s => { s=String(s).toLowerCase().replace(/[,₹\s]|rs/g,""); let m=1;
@@ -267,7 +280,7 @@ tg?.MainButton?.onClick(submit);
 $("fallbackBtn").onclick = submit;
 if(!tg || !tg.initData) $("fallbackBtn").style.display="block";   // opened outside Telegram (preview)
 
-renderClients(); renderDesc(D.d);
+renderClients(); renderDesc(D.d); renderPlace(D.p);
 if(D.c.length===1) pickClient(0);
 if(!D.c.length) $("autoNote").textContent = "Open this form from the bot's New Invoice button to see your clients.", $("autoNote").style.display="block";
 update();
